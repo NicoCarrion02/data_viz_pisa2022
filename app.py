@@ -28,23 +28,28 @@ def procesar_clic_acumulativo(incoming, last_raw, activos_actuales):
     nuevos_activos = activos_actuales.copy()
     
     if len(incoming) == 1:
-        # Si se hizo un clic normal, evaluamos si ya estaba para agregarlo o quitarlo
         pais_clickeado = incoming[0]
         if pais_clickeado in nuevos_activos:
             nuevos_activos.remove(pais_clickeado)
         else:
             nuevos_activos.append(pais_clickeado)
     elif len(incoming) == 0 and len(last_raw) == 1:
-        # Plotly envía una lista vacía cuando vuelves a hacer clic exactamente en el último punto (Deselección nativa)
         if last_raw[0] in nuevos_activos:
             nuevos_activos.remove(last_raw[0])
     elif len(incoming) > 1:
-        # Si el usuario selecciona varios de golpe (con Shift o Lazo)
         for pais in incoming:
             if pais not in nuevos_activos:
                 nuevos_activos.append(pais)
                 
     return nuevos_activos
+
+# Callback para limpiar todo de forma segura ANTES de renderizar los widgets
+def limpiar_todo():
+    st.session_state.activos = []
+    st.session_state.last_map = []
+    st.session_state.last_bar = []
+    st.session_state.last_ms = []
+    st.session_state.filtro_paises_widget = []
 
 # A. Leer qué está seleccionado directamente desde los gráficos y el filtro
 curr_map = []
@@ -61,7 +66,7 @@ curr_ms = st.session_state.get("filtro_paises_widget", [])
 if curr_map != st.session_state.last_map:
     st.session_state.activos = procesar_clic_acumulativo(curr_map, st.session_state.last_map, st.session_state.activos)
     st.session_state.last_map = curr_map
-    st.session_state.last_ms = st.session_state.activos.copy() # Sincroniza filtro
+    st.session_state.last_ms = st.session_state.activos.copy()
     
 elif curr_bar != st.session_state.last_bar:
     st.session_state.activos = procesar_clic_acumulativo(curr_bar, st.session_state.last_bar, st.session_state.activos)
@@ -107,13 +112,8 @@ with st.sidebar:
         key="filtro_paises_widget"
     )
     
-    if st.button("🔄 Limpiar Selección", use_container_width=True):
-        st.session_state.activos = []
-        st.session_state.last_map = []
-        st.session_state.last_bar = []
-        st.session_state.last_ms = []
-        st.session_state.filtro_paises_widget = []
-        st.rerun()
+    # Se reemplaza la lógica en línea por el callback
+    st.button("🔄 Limpiar Selección", use_container_width=True, on_click=limpiar_todo)
 
 # ==========================================
 # 4. CABECERA PRINCIPAL
@@ -196,7 +196,6 @@ if hay_seleccion:
         
     st.subheader(titulo)
     k1, k2, k3 = st.columns(3)
-    # Solo mostramos el vs Mundo cuando hay una selección activa
     k1.metric(f"Promedio {materia}", f"{val_promedio:.1f}", f"{val_promedio - global_avg:.1f} vs Mundo")
     k2.metric("Índice de Ansiedad", f"{val_ansiedad:.2f}", f"{val_ansiedad - global_anx:.2f} vs Mundo", delta_color="inverse")
     k3.metric("Muestra Evaluada", f"{val_muestra:,} estudiantes")
