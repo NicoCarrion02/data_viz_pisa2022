@@ -1,29 +1,28 @@
 import streamlit as st
 import plotly.express as px
 import pandas as pd
-from etl import procesar_datos_completos, calcular_resumen_macro
+from etl import cargar_datos, resumen_paises
 
 # 1. Configuración adaptativa
 st.set_page_config(page_title="PISA 2022: Análisis de Brechas", page_icon="📊", layout="wide")
 
 @st.cache_data
 def cargar_todo():
-    df_micro = procesar_datos_completos("data/pisa2022.parquet")
-    df_macro = calcular_resumen_macro(df_micro).reset_index(drop=True)
+    df_micro = cargar_datos("data/pisa2022.parquet")
+    df_macro = resumen_paises(df_micro).reset_index(drop=True)
     return df_micro, df_macro
 
 df_micro, df_macro = cargar_todo()
 paises_disponibles = sorted(df_macro["CNT"].unique())
 
-# ==========================================
-# 2. MOTOR DE SINCRONIZACIÓN Y SELECCIÓN MÚLTIPLE
-# ==========================================
-# Inicializamos las memorias del estado
+# 2. Sincronización entre mapa, ranking y filtro
+
+# Estado inicial
 for key in ["activos", "last_map", "last_bar", "last_ms"]:
     if key not in st.session_state:
         st.session_state[key] = []
 
-def procesar_clic_acumulativo(incoming, last_raw, activos_actuales):
+def actualizar_seleccion(incoming, last_raw, activos_actuales):
     """Lógica que permite agregar o quitar países con un solo clic sin borrar los anteriores."""
     nuevos_activos = activos_actuales.copy()
     
@@ -43,7 +42,7 @@ def procesar_clic_acumulativo(incoming, last_raw, activos_actuales):
                 
     return nuevos_activos
 
-# Callback para limpiar todo de forma segura ANTES de renderizar los widgets
+# Reinicia la selección
 def limpiar_todo():
     st.session_state.activos = []
     st.session_state.last_map = []
@@ -51,7 +50,7 @@ def limpiar_todo():
     st.session_state.last_ms = []
     st.session_state.filtro_paises_widget = []
 
-# A. Leer qué está seleccionado directamente desde los gráficos y el filtro
+# Selección actual
 curr_map = []
 if "map_chart" in st.session_state and st.session_state.map_chart:
     curr_map = [p["location"] for p in st.session_state.map_chart.get("selection", {}).get("points", [])]
@@ -62,14 +61,14 @@ if "bar_chart" in st.session_state and st.session_state.bar_chart:
 
 curr_ms = st.session_state.get("filtro_paises_widget", [])
 
-# B. Detectar exactamente qué interfaz usó el usuario y actualizar todo
+# Sincronizar selección
 if curr_map != st.session_state.last_map:
-    st.session_state.activos = procesar_clic_acumulativo(curr_map, st.session_state.last_map, st.session_state.activos)
+    st.session_state.activos = actualizar_seleccion(curr_map, st.session_state.last_map, st.session_state.activos)
     st.session_state.last_map = curr_map
     st.session_state.last_ms = st.session_state.activos.copy()
     
 elif curr_bar != st.session_state.last_bar:
-    st.session_state.activos = procesar_clic_acumulativo(curr_bar, st.session_state.last_bar, st.session_state.activos)
+    st.session_state.activos = actualizar_seleccion(curr_bar, st.session_state.last_bar, st.session_state.activos)
     st.session_state.last_bar = curr_bar
     st.session_state.last_ms = st.session_state.activos.copy()
 
@@ -77,15 +76,12 @@ elif curr_ms != st.session_state.last_ms:
     st.session_state.activos = curr_ms.copy()
     st.session_state.last_ms = curr_ms.copy()
 
-# C. Forzar al filtro lateral a mostrar la verdad absoluta
+# Actualizar multiselect
 st.session_state.filtro_paises_widget = st.session_state.activos
 activos = st.session_state.activos
-hay_seleccion = len(activos) > 0
+flag_seleccion = len(activos) > 0
 
-
-# ==========================================
-# 3. BARRA LATERAL: Controles y Filtros
-# ==========================================
+# 3. Barra Lateral
 with st.sidebar:
     st.header("⚙️ Parámetros")
     
@@ -115,15 +111,13 @@ with st.sidebar:
     # Se reemplaza la lógica en línea por el callback
     st.button("🔄 Limpiar Selección", use_container_width=True, on_click=limpiar_todo)
 
-# ==========================================
-# 4. CABECERA PRINCIPAL
-# ==========================================
-st.title("🌍 Desempeño y Brechas Educativas en PISA 2022")
+# Vista principal
+st.title("Desempeño y Brechas Educativas en PISA 2022")
 st.markdown(f"Rendimiento global en **{materia}** y exploración de desigualdades estructurales.")
 
 col_mapa, col_rank = st.columns([1.5, 1])
 
-# --- PANEL 1: MAPA GLOBAL ---
+# Panel 1: Mapa Cloroplético
 with col_mapa:
     fig_mapa = px.choropleth(
         df_macro, locations="CNT", color=col_promedio, hover_name="CNT",
@@ -131,7 +125,7 @@ with col_mapa:
     )
     fig_mapa.update_traces(hovertemplate="<b>%{hovertext}</b><br>Promedio: %{z:.1f}<extra></extra>")
     
-    if hay_seleccion:
+    if flag_seleccion:
         indices_mapa = df_macro.index[df_macro['CNT'].isin(activos)].tolist()
         fig_mapa.update_traces(selectedpoints=indices_mapa)
 
@@ -143,10 +137,10 @@ with col_mapa:
     
     st.plotly_chart(fig_mapa, use_container_width=True, theme="streamlit", on_select="rerun", key="map_chart")
 
-# --- PANEL 2: RANKING DIRECTO ---
+# Panel 2: Ranking con barras horizontales
 with col_rank:
     df_top = df_macro.sort_values(by=col_promedio, ascending=False).head(n_paises)
-    if hay_seleccion:
+    if flag_seleccion:
         df_extra = df_macro[df_macro["CNT"].isin(activos)]
         df_top = pd.concat([df_top, df_extra]).drop_duplicates(subset=["CNT"])
     
@@ -157,7 +151,7 @@ with col_rank:
         color_discrete_sequence=["#3B82F6"]
     )
     
-    if hay_seleccion:
+    if flag_seleccion:
         indices_barra = df_top.index[df_top['CNT'].isin(activos)].tolist()
         fig_bar.update_traces(selectedpoints=indices_barra)
 
@@ -170,38 +164,36 @@ with col_rank:
 
 st.divider()
 
-# ==========================================
-# 5. SECCIÓN INFERIOR: Vista Micro y KPIs
-# ==========================================
+# 5. KPIs y análisis detallado
 global_avg = df_macro[col_promedio].mean()
 global_anx = df_macro["Ansiedad_Avg"].mean()
 global_muestra = df_macro["Muestra_Estudiantes"].sum()
 
-if hay_seleccion:
+if flag_seleccion:
     df_analisis = df_micro[df_micro["CNT"].isin(activos)]
-    macro_activos = df_macro[df_macro["CNT"].isin(activos)]
+    df_sel = df_macro[df_macro["CNT"].isin(activos)]
     
-    val_promedio = macro_activos[col_promedio].mean()
-    val_ansiedad = macro_activos["Ansiedad_Avg"].mean()
-    val_muestra = macro_activos["Muestra_Estudiantes"].sum()
+    val_promedio = df_sel[col_promedio].mean()
+    val_ansiedad = df_sel["Ansiedad_Avg"].mean()
+    val_muestra = df_sel["Muestra_Estudiantes"].sum()
     
     # Lógica dinámica del título
     n_sel = len(activos)
     if n_sel == 1:
-        titulo = f"🔍 Análisis Detallado: {activos[0]}"
+        titulo = f"Análisis Detallado: {activos[0]}"
     elif n_sel <= 5:
-        titulo = f"🔍 Análisis Detallado: {', '.join(activos)}"
+        titulo = f"Análisis Detallado: {', '.join(activos)}"
     else:
-        titulo = f"🔍 Análisis Detallado: {n_sel} países seleccionados"
+        titulo = f"Análisis Detallado: {n_sel} países seleccionados"
         
     st.subheader(titulo)
     k1, k2, k3 = st.columns(3)
     k1.metric(f"Promedio {materia}", f"{val_promedio:.1f}", f"{val_promedio - global_avg:.1f} vs Mundo")
     k2.metric("Índice de Ansiedad", f"{val_ansiedad:.2f}", f"{val_ansiedad - global_anx:.2f} vs Mundo", delta_color="inverse")
-    k3.metric("Muestra Evaluada", f"{val_muestra:,} estudiantes")
+    k3.metric("Muestra Evaluada", f"{val_muestra:,} estudiantes", f"{val_muestra / global_muestra * 100 :.1f}% del total", delta_color="off", delta_arrow="off")
 else:
     df_analisis = df_micro.sample(n=min(len(df_micro), 15000), random_state=42)
-    st.subheader("🌐 Análisis Global (Haz clic en países o búscalo en el filtro para desglosarlo)")
+    st.subheader("Análisis Global")
     
     k1, k2, k3 = st.columns(3)
     k1.metric(f"Promedio Global {materia}", f"{global_avg:.1f}")
