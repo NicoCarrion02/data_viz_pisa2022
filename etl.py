@@ -1,7 +1,6 @@
 import pandas as pd
 
-def procesar_datos_completos(ruta_parquet: str) -> pd.DataFrame:
-    """Carga y procesa los datos incluyendo las 3 materias principales."""
+def cargar_datos(ruta_parquet: str) -> pd.DataFrame:
     cols = ["CNT", "ST004D01T", "ESCS", "PV1MATH", "PV1READ", "PV1SCIE", "ANXMAT"]
     df = pd.read_parquet(ruta_parquet, columns=cols)
     
@@ -15,8 +14,7 @@ def procesar_datos_completos(ruta_parquet: str) -> pd.DataFrame:
     df = df.rename(columns={"PV1MATH": "Matemáticas", "PV1READ": "Lectura", "PV1SCIE": "Ciencias"})
     return df
 
-def calcular_resumen_macro(df: pd.DataFrame) -> pd.DataFrame:
-    """Calcula promedios a nivel país."""
+def resumen_paises(df: pd.DataFrame) -> pd.DataFrame:
     resumen = df.groupby("CNT").agg(
         Matematicas_Avg=("Matemáticas", "mean"),
         Lectura_Avg=("Lectura", "mean"),
